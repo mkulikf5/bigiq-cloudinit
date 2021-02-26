@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # coding=utf-8
 # pylint: disable=broad-except,unused-argument,line-too-long, unused-variable
@@ -32,6 +32,8 @@ import logging
 import subprocess
 import guestfs
 import re
+
+from pathlib import Path
 
 from Crypto.Hash import SHA384
 from Crypto.Signature import PKCS1_v1_5
@@ -91,7 +93,7 @@ def patch_images(bigiq_image_dir, bigiq_cloudinit_dir, bigiq_usr_inject_dir,
                                         config_dev)
                 if os.path.splitext(disk_image)[1] == '.vmdk':
                     clean_up_vmdk(disk_image)
-            generate_md5sum(disk_image)
+            #generate_md5sum(disk_image)
             if private_pem_key_path:
                 try:
                     sign_image(disk_image, private_pem_key_path)
@@ -176,9 +178,8 @@ def convert_vmdk(image_file, variant):
     start_directory = os.getcwd()
     convert_dir = os.path.dirname(image_file)
     image_file = os.path.basename(image_file)
-    LOG.warn('converting VMDK format to %s format', variant)
+    LOG.warning('converting VMDK format to %s format', variant)
     os.chdir(convert_dir)
-    FNULL = open(os.devnull, 'w')
     subprocess.call([
         VBOXMANAGE_CLI,
         'clonemedium',
@@ -189,32 +190,41 @@ def convert_vmdk(image_file, variant):
         image_file,
         'converted.vmdk',
     ],
-                    stdout=FNULL,
-                    stderr=subprocess.STDOUT)
+                    stdout=subprocess.DEVNULL)
     subprocess.call(['/bin/mv', '-f', 'converted.vmdk', image_file])
     os.chdir(start_directory)
 
 
+def clean_virtualbox(path):
+    for sub in path.iterdir():
+        if sub.is_dir():
+            clean_virtualbox(sub)
+        else:
+            sub.unlink()
+    path.rmdir() 
+
+
 def clean_up_vmdk(disk_image):
     """Convert VMDK image to output format and remove OVF references to old image"""
+    clean_virtualbox(Path(Path.home() / '.config' /  'VirtualBox'))
     convert_vmdk(disk_image, VBOXMANAGE_CLI_OUTPUT_VARIANT)
     convert_dir = os.path.dirname(disk_image)
     for file_name in os.listdir(convert_dir):
         if file_name.endswith('.mf'):
-            LOG.warn('removing mf hash file %s', file_name)
+            LOG.warning('removing mf hash file %s', file_name)
             os.remove(os.path.join(convert_dir, file_name))
     for file_name in os.listdir(convert_dir):
         if file_name.endswith('.cert'):
-            LOG.warn('removing signing file %s', file_name)
+            LOG.warning('removing signing file %s', file_name)
             os.remove(os.path.join(convert_dir, file_name))
     ovf_file_name = None
     for file_name in os.listdir(convert_dir):
         if file_name.endswith('.ovf'):
-            LOG.warn('patching OVF to remove restrictions')
+            LOG.warning('patching OVF to remove restrictions')
             ovf_file_name = file_name
             clean_ovf(os.path.join(convert_dir, file_name))
     ova_name = "%s.ova" % os.path.basename(convert_dir)
-    LOG.info('createing OVA image %s', ova_name)
+    LOG.info('creating OVA image %s', ova_name)
     start_directory = os.getcwd()
     os.chdir(convert_dir)
     ova_file = tarfile.TarFile(ova_name, 'w')
@@ -313,7 +323,7 @@ def validate_bigiq_device(disk_image):
         if 'share' in file_system:
             shared_dev = file_system
     if not is_bigiq:
-        LOG.warn('%s is not a BIGIQ image file.. skipping..', disk_image)
+        LOG.warning('%s is not a BIGIQ image file.. skipping..', disk_image)
     gfs.sync()
     gfs.shutdown()
     gfs.close()
@@ -327,7 +337,7 @@ def update_cloudinit_modules(bigiq_cloudinit_dir):
     start_directory = os.getcwd()
     os.chdir(bigiq_cloudinit_dir)
     gitout = subprocess.Popen("git pull", stdout=subprocess.PIPE,
-                              shell=True).communicate()[0].split('\n')
+                              shell=True, encoding='utf8').communicate()[0].split('\n')
     LOG.info('git returned: %s', gitout)
     os.chdir(start_directory)
 
@@ -462,7 +472,7 @@ def inject_config_files(disk_image, config_dir, dev):
 
 if __name__ == "__main__":
     if not os.environ['USER'] == 'root':
-        print "Please run this script as sudo"
+        print("Please run this script as sudo")
         sys.exit(1)
     START_TIME = time.time()
     LOG.debug(
